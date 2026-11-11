@@ -1,0 +1,76 @@
+name: Build ARM64-v8a APK
+
+on:
+  push:
+    branches:
+      - master
+      - feature/**
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/fdroid.yml'
+      - '.github/workflows/nix.yml'
+      - '.github/workflows/publish.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch source code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Android environment
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and CMake
+        run: |
+          sdkmanager --install "cmake;3.31.6"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install extra-cmake-modules gettext
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build arm64-v8a Release APK
+        run: |
+          ./gradlew :app:assembleRelease -Pandroid.injected.build.abi=arm64-v8a
+
+      - name: Get commit info
+        id: commit_info
+        run: |
+          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "commit_msg=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: List build outputs
+        run: |
+          echo "=== Listing APK build outputs ==="
+          find app/build/outputs -name "*.apk" -type f
+
+      - name: Rename APK
+        run: |
+          # 找到所有 APK 文件并重命名
+          find app/build/outputs/apk -name "*.apk" -type f | while read apk; do
+            dir=$(dirname "$apk")
+            newname="fcitx5-android-arm64-v8a-${{ steps.commit_info.outputs.timestamp }}-${{ steps.commit_info.outputs.short_sha }}.apk"
+            mv "$apk" "$dir/$newname"
+            echo "Renamed: $apk -> $dir/$newname"
+          done
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: fcitx5-android-arm64-v8a-${{ steps.commit_info.outputs.short_sha }}
+          path: app/build/outputs/apk/**/*.apk
+          retention-days: 30
